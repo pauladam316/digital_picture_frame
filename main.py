@@ -7,10 +7,14 @@ from io import BytesIO
 import cv2
 import numpy as np
 import sys
+import random
+import argparse
+from argparse import RawTextHelpFormatter
+import time
+import keyboard
 
 target_height = 512
 target_width = math.ceil(target_height*1.67)
-art_prompt = "A sculpture of a roman soldier"
 
 def crop(in_fn, out_fn, new_width):
     im = Image.open(in_fn + ".png")
@@ -50,18 +54,7 @@ def extend(in_fn, out_fn, new_size):
     new_image = Image.new('RGBA', (new_size, new_size), (0, 0, 0, 0))
     new_image.paste(im_right, (0, y1, right_width, y1 + right_height))
     new_image.save(out_fn + "_right.png")
-
-def generate_image(out_fn):
-    response = openai.Image.create(
-    prompt=art_prompt,
-    n=1,
-    size="512x512"
-    )
-    image_url = response['data'][0]['url']
-    print(image_url)
-    img = Image.open(BytesIO(requests.get(image_url).content))
-    img.putalpha(255)
-    img.save(out_fn+ '.png')
+   
 
 def combine(in_fn, out_fn):
     im_left = Image.open(in_fn + "_left.png")
@@ -74,11 +67,11 @@ def combine(in_fn, out_fn):
     new_image.paste(im_right, (target_width-im_right.width, 0, target_width, target_height))
     new_image.save(out_fn + ".png")
 
-def generate_extended_image(in_fn, out_fn):
+def generate_extended_image(in_fn, out_fn, text_prompt):
     edited_image = openai.Image.create_edit(
         image=open(in_fn + "_left.png", "rb"),
         mask=open(in_fn + "_left.png", "rb"),
-        prompt=art_prompt,
+        prompt=text_prompt,
         n=1,
         size="512x512"
     )
@@ -91,7 +84,7 @@ def generate_extended_image(in_fn, out_fn):
     edited_image = openai.Image.create_edit(
         image=open(in_fn + "_right.png", "rb"),
         mask=open(in_fn + "_right.png", "rb"),
-        prompt=art_prompt,
+        prompt=text_prompt,
         n=1,
         size="512x512"
     )
@@ -101,13 +94,6 @@ def generate_extended_image(in_fn, out_fn):
     img.putalpha(255)
     img.save(out_fn + "_right.png")
 
-#openai.api_key = "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"
-#generate_image('test_image')
-#crop('test_image', 'test_image', math.ceil((target_width-target_height)/2) )
-#extend('test_image', 'test_image', target_height )
-#generate_extended_image('test_image', 'test_image')
-#combine("test_image", "test_image_combined")
-
 def draw_gradient_alpha_rectangle(frame, BGR_Channel, rectangle_position, rotate):
     (xMin, yMin), (xMax, yMax) = rectangle_position
     color = np.array(BGR_Channel, np.uint8)[np.newaxis, :]
@@ -116,25 +102,92 @@ def draw_gradient_alpha_rectangle(frame, BGR_Channel, rectangle_position, rotate
 
     return frame
 
-img=cv2.imread("test_image_combined.png", cv2.IMREAD_ANYCOLOR)
-font = cv2.FONT_HERSHEY_SIMPLEX
-font_scale = 1.5
-thickness = 2
-text="A sculpture of a roman soldier"
-textsize = cv2.getTextSize(text, font, font_scale, thickness)[0]
-# get coords based on boundary
-textX = int((img.shape[1] - textsize[0]) / 2)
-textY = int(img.shape[0]-30)
+def generate_image_from_prompt(text_prompt):
+    api_key = open('api_key.txt', 'r')
+    openai.api_key =  api_key.readlines()[0].strip()
+    img_name = "test_image"
+    response = openai.Image.create(
+        prompt=text_prompt,
+        n=1,
+        size="512x512"
+    )
+    image_url = response['data'][0]['url']
+    print(image_url)
+    img = Image.open(BytesIO(requests.get(image_url).content))
+    img.putalpha(255)
+    img.save(img_name + '.png')
 
-rectangle = draw_gradient_alpha_rectangle(img, (0,0,0),((0,img.shape[0]-100),(img.shape[1],img.shape[0])),3)
+    crop(img_name, img_name, math.ceil((target_width-target_height)/2) )
+    extend(img_name, img_name, target_height)
+    generate_extended_image(img_name, img_name, text_prompt)
+    combine(img_name, f"{img_name}_combined")
+    return cv2.imread(f"{img_name}_combined.png", cv2.IMREAD_ANYCOLOR)
 
-cv2.putText(img,text,(textX, textY), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
-cv2.namedWindow("window", cv2.WND_PROP_FULLSCREEN)
-cv2.setWindowProperty("window",cv2.WND_PROP_FULLSCREEN,cv2.WINDOW_FULLSCREEN)
+def generate_text_prompt():
+    subjectprompts = open('subjectprompts.txt', 'r')
+    subjects = subjectprompts.readlines()
+    num_subjects = len(subjects)
+
+    artistprompts = open('artistprompts.txt', 'r')
+    artists = artistprompts.readlines()
+    num_artists = len(artists)
+
+    selected_subject = random.randint(0,num_subjects-1)
+    selected_artist = random.randint(0,num_artists-1)
+
+    return f"A painting of {subjects[selected_subject].strip()} in the style of {artists[selected_artist].strip()}"
+
+def format_text_on_image(text_prompt, image):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.9
+    font_color = (255, 255, 255)
+    thickness = 1
+    text_height_offset = 20
+    text_width_offset = 10
+
+    (text_width, text_height) = cv2.getTextSize(text_prompt, font, font_scale, thickness)[0]
+    text_height += text_height_offset
+
+    mask = np.zeros((text_height, text_width+text_width_offset*2), dtype=np.uint8)
+    mask = cv2.putText(mask, text_prompt, (text_width_offset,text_height_offset), font, font_scale, font_color, thickness,cv2.LINE_AA)
+
+    text_ratio = image.shape[1]/mask.shape[1]
+
+    mask = cv2.resize(mask, (image.shape[1], int(text_height*text_ratio)))
+
+    draw_gradient_alpha_rectangle(image, (0,0,0),((0,image.shape[0]-100),(image.shape[1],image.shape[0])),3)
+
+    mask = cv2.merge((mask, mask, mask))
+    image[-int(text_height*text_ratio):, :, :] = cv2.bitwise_or(image[-int(text_height*text_ratio):, :, :], mask)
+
+    return image
+
+def main():
+
+    parser = argparse.ArgumentParser(description='Run the digital picture frame', formatter_class=RawTextHelpFormatter)
+    parser.add_argument('-i', '--interval', type=str, help='Interval that the photos should update at (in hours)', required=True)
+    parser.add_argument('-c', '--use_cached', action='store_true', help='use a cached image instead of generating a new one')
+    args = parser.parse_args()
+
+    while (True):
+        text_prompt = generate_text_prompt()
+
+        if args.use_cached:
+            img=cv2.imread("test_image_combined.png", cv2.IMREAD_ANYCOLOR)
+        else:
+            img=generate_image_from_prompt(text_prompt)
+
+        img = format_text_on_image(text_prompt, img)
+        
+        cv2.namedWindow("window", cv2.WND_PROP_FULLSCREEN)
+        cv2.setWindowProperty("window",cv2.WND_PROP_FULLSCREEN,cv2.WINDOW_FULLSCREEN)
+
+        cv2.imshow("window", img)
+        cv2.waitKey(int(float(args.interval)*60*60*1000))
+        if keyboard.is_pressed("a"):
+            sys.exit() # to exit from all the processes
+        
+if __name__ == "__main__":
+    main()
 
 
-while True:
-    cv2.imshow("window", img)
-    
-    cv2.waitKey(0)
-    sys.exit() # to exit from all the processes
