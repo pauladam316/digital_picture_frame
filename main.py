@@ -16,6 +16,9 @@ import keyboard
 target_height = 512
 target_width = math.ceil(target_height*1.67)
 
+resize_height = 480
+resize_width = 800
+
 def crop(in_fn, out_fn, new_width):
     im = Image.open(in_fn + ".png")
     remove = int(math.ceil((im.width-new_width)/2)) * 2
@@ -66,6 +69,11 @@ def combine(in_fn, out_fn):
     new_image.paste(im_left, (0, 0, im_left.width, target_height))
     new_image.paste(im_right, (target_width-im_right.width, 0, target_width, target_height))
     new_image.save(out_fn + ".png")
+
+def resize(in_fn, out_fn):
+    input_img = Image.open(in_fn + ".png")
+    input_img = input_img.resize((resize_width, resize_height))
+    input_img.save(out_fn + ".png")
 
 def generate_extended_image(in_fn, out_fn, text_prompt):
     edited_image = openai.Image.create_edit(
@@ -121,7 +129,8 @@ def generate_image_from_prompt(text_prompt):
     extend(img_name, img_name, target_height)
     generate_extended_image(img_name, img_name, text_prompt)
     combine(img_name, f"{img_name}_combined")
-    return cv2.imread(f"{img_name}_combined.png", cv2.IMREAD_ANYCOLOR)
+    resize(f"{img_name}_combined", f"{img_name}_resized")
+    return cv2.imread(f"{img_name}_resized.png", cv2.IMREAD_ANYCOLOR)
 
 def generate_text_prompt():
     subjectprompts = open('subjectprompts.txt', 'r')

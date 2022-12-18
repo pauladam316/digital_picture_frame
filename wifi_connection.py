@@ -1,45 +1,55 @@
-from PyQt6 import QtCore, QtGui, QtWidgets
-from PyQt6.QtWidgets import QApplication
+from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtCore import *
 import sys
-import wifi
+import wifi_ui
 import subprocess
 import os
 import urllib.request
 import time
+from wifi import Cell, Scheme
+from wifi import exceptions as wifiexceptions
+from threading import Thread
 
-class WifiConnection(QtWidgets.QMainWindow, wifi.Ui_MainWindow):
+class WifiFinder:
+    def __init__(self, *args, **kwargs):
+        self.server_name = kwargs['server_name']
+        self.password = kwargs['password']
+        self.interface_name = kwargs['interface']
+        self.main_dict = {}
+
+    def run(self):
+        command = """sudo iwlist wlan0 scan | grep -ioE 'ssid:"(.*{}.*)'"""
+        result = os.popen(command.format(self.server_name))
+        result = list(result)
+
+        if "Device or resource busy" in result:
+                return None
+        else:
+            ssid_list = [item.lstrip('SSID:').strip('"\n') for item in result]
+            print("Successfully get ssids {}".format(str(ssid_list)))
+
+        for name in ssid_list:
+            try:
+                result = self.connection(name)
+            except Exception as exp:
+                print("Couldn't connect to name : {}. {}".format(name, exp))
+            else:
+                if result:
+                    print("Successfully connected to {}".format(name))
+
+    def connection(self, name):
+        try:
+            os.system("nmcli d wifi connect {} password {}".format(name,
+       self.password))
+        except:
+            raise
+        else:
+            return True
+
+
+class WifiConnection(QtWidgets.QMainWindow, wifi_ui.Ui_MainWindow):
   
-    # function to establish a new connection
-    def createNewConnection(self, name, SSID, password):
-        config = """<?xml version=\"1.0\"?>
-        <WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
-            <name>"""+name+"""</name>
-            <SSIDConfig>
-                <SSID>
-                    <name>"""+SSID+"""</name>
-                </SSID>
-            </SSIDConfig>
-            <connectionType>ESS</connectionType>
-            <connectionMode>auto</connectionMode>
-            <MSM>
-                <security>
-                    <authEncryption>
-                        <authentication>WPA2PSK</authentication>
-                        <encryption>AES</encryption>
-                        <useOneX>false</useOneX>
-                    </authEncryption>
-                    <sharedKey>
-                        <keyType>passPhrase</keyType>
-                        <protected>false</protected>
-                        <keyMaterial>"""+password+"""</keyMaterial>
-                    </sharedKey>
-                </security>
-            </MSM>
-        </WLANProfile>"""
-        command = "netsh wlan add profile filename=\""+name+".xml\""+" interface=Wi-Fi"
-        with open(name+".xml", 'w') as file:
-            file.write(config)
-        os.system(command)
 
     def check_connection(self, host='http://google.com'):
         try:
@@ -48,16 +58,12 @@ class WifiConnection(QtWidgets.QMainWindow, wifi.Ui_MainWindow):
         except:
             return False
 
-    
-    # function to connect to a network   
-    def connect_to_wifi(self, name, SSID):
-        command = "netsh wlan connect name=\""+name+"\" ssid=\""+SSID+"\" interface=Wi-Fi"
-        output = subprocess.check_output(command)
-        print(output)
-        return True # Connected
-
     def get_wifi_list(self):
-        wifi_list = []
+        wifi_list = list(Cell.all('wlan0'))
+        ssids = []
+        for element in wifi_list:
+                ssids.append(element.ssid)
+        return ssids
         # using the check_output() for having the network term retrieval
         devices = subprocess.check_output(['netsh','wlan','show','network'])
         #os.system('cmd /c "netsh wlan show networks"')
@@ -76,31 +82,60 @@ class WifiConnection(QtWidgets.QMainWindow, wifi.Ui_MainWindow):
 
         return wifi_list
 
+    def refresh_wifi_list(self):
+        self.cb_wifi_names.clear()
+        self.cb_wifi_names.addItems(self.get_wifi_list())
+
+    def closeEvent(self, event):
+        os.system("dbus-send --type=method_call --dest=org.onboard.Onboard /org/onboard/Onboard/Keyboard org.onboard.Onboard.Keyboard.Hide")
+        event.accept()
+
     def __init__(self, parent=None):
         super(WifiConnection, self).__init__(parent)
         self.setWindowIcon(QtGui.QIcon('logo.ico'))
         self.setupUi(self)
 
-        
+        print(list(Cell.all('wlan0')))
         self.cb_wifi_names.addItems(self.get_wifi_list())
         self.pb_connect.clicked.connect(self.pb_connect_clicked)
-        self.showMaximized()
+        self.pushButton_2.clicked.connect(self.refresh_wifi_list)
+        self.setWindowFlags(Qt.WindowStaysOnBottomHint)
+        self.show()
+        self.enable_keyboard()
         #print(devices)
         #print(devices)
+
+    def enable_keyboard(self):
+        print('enabling')
+        os.system("dbus-send --type=method_call --dest=org.onboard.Onboard /org/onboard/Onboard/Keyboard org.onboard.Onboard.Keyboard.Show")
 
     def pb_connect_clicked(self):
-        self.lb_conn_status.setText("Connecting...")
-        self.lb_conn_status.repaint()
         name = self.cb_wifi_names.currentText()
 
-        self.createNewConnection(name, name, self.le_password.text())
-        self.connect_to_wifi(name, name)
+        #self.createNewConnection(name, name, self.le_password.text())
+        #result = self.connect_to_wifi(name, self.le_password.text())
+        #if result == False:
+        #    self.lb_conn_status.setText("Connection Failed")
+        #    return
+        WF = WifiFinder(server_name=name,
+               password=self.le_password.text(),
+               interface='wlan0')
+        thread = Thread(target = WF.run)
+        thread.start()
+
 
         timeout = time.time()+30
         connected = False
+        i = 0
         while (time.time() < timeout):
+            time.sleep(0.5)
+            connection_string = "Connecting"
+            for element in range(i%4):
+                connection_string += "."
+            self.lb_conn_status.setText(connection_string)
+            QApplication.processEvents()
+            i += 1
             if (self.check_connection()):
-                print("connection")
                 connected = True
                 break
         
