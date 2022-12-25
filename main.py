@@ -12,21 +12,27 @@ import argparse
 from argparse import RawTextHelpFormatter
 import time
 import keyboard
+from threading import Thread
+import urllib.request
+import os
+import subprocess
 
 target_height = 512
 target_width = math.ceil(target_height*1.67)
 
 resize_height = 480
 resize_width = 800
+kill_thread = False
+path = os.path.dirname(os.path.realpath(__file__))
 
 def crop(in_fn, out_fn, new_width):
-    im = Image.open(in_fn + ".png")
+    im = Image.open(path + "/" + in_fn + ".png")
     remove = int(math.ceil((im.width-new_width)/2)) * 2
     size = im.width - remove
     im_left = im.crop((0, 0, (im.width-size), im.height))
     im_right = im.crop((size, 0, im.width, im.height))
-    im_left.save(out_fn + "_left.png")
-    im_right.save(out_fn + "_right.png")
+    im_left.save(path + "/" + out_fn + "_left.png")
+    im_right.save(path + "/" + out_fn + "_right.png")
 
 def resize(in_fn, out_fn, new_size, rs_type=None):
     """rs_type: Image.Resampling.NEAREST is no antialiasing fastest but noisy results,
@@ -35,50 +41,50 @@ def resize(in_fn, out_fn, new_size, rs_type=None):
     """
     if not rs_type:
         rs_type = Image.Resampling.BOX
-    im = Image.open(in_fn)
+    im = Image.open(path + "/" + in_fn)
     im = im.resize((new_size,new_size), rs_type)
-    im.save(out_fn)
+    im.save(path + "/" + out_fn)
 
 def extend(in_fn, out_fn, new_size):
-    im_left = Image.open(in_fn + "_left.png")
+    im_left = Image.open(path + "/" + in_fn + "_left.png")
     im_left = im_left.convert('RGBA')
     left_width, left_height = im_left.size
     x1 = (new_size - left_width) // 2
     y1 = (new_size - left_height) // 2
     new_image = Image.new('RGBA', (new_size, new_size), (0, 0, 0, 0))
     new_image.paste(im_left, (new_size-left_width, y1, new_size, y1 + left_height))
-    new_image.save(out_fn + "_left.png")
+    new_image.save(path + "/" + out_fn + "_left.png")
 
-    im_right = Image.open(in_fn + "_right.png")
+    im_right = Image.open(path + "/" + in_fn + "_right.png")
     im_right = im_right.convert('RGBA')
     right_width, right_height = im_right.size
     x1 = (new_size - right_width) // 2
     y1 = (new_size - right_height) // 2
     new_image = Image.new('RGBA', (new_size, new_size), (0, 0, 0, 0))
     new_image.paste(im_right, (0, y1, right_width, y1 + right_height))
-    new_image.save(out_fn + "_right.png")
+    new_image.save(path + "/" + out_fn + "_right.png")
    
 
 def combine(in_fn, out_fn):
-    im_left = Image.open(in_fn + "_left.png")
-    im_right = Image.open(in_fn + "_right.png")
-    im_middle = Image.open(in_fn + ".png")
+    im_left = Image.open(path + "/" + in_fn + "_left.png")
+    im_right = Image.open(path + "/" + in_fn + "_right.png")
+    im_middle = Image.open(path + "/" + in_fn + ".png")
 
     new_image = Image.new('RGBA', (target_width, target_height), (0, 0, 0, 0))
     new_image.paste(im_middle, ((int)((target_width/2)-(im_middle.width/2)), 0, (int)((target_width/2)+(im_middle.width/2)), target_height))
     new_image.paste(im_left, (0, 0, im_left.width, target_height))
     new_image.paste(im_right, (target_width-im_right.width, 0, target_width, target_height))
-    new_image.save(out_fn + ".png")
+    new_image.save(path + "/" + out_fn + ".png")
 
 def resize(in_fn, out_fn):
-    input_img = Image.open(in_fn + ".png")
+    input_img = Image.open(path + "/" + in_fn + ".png")
     input_img = input_img.resize((resize_width, resize_height))
-    input_img.save(out_fn + ".png")
+    input_img.save(path + "/" + out_fn + ".png")
 
 def generate_extended_image(in_fn, out_fn, text_prompt):
     edited_image = openai.Image.create_edit(
-        image=open(in_fn + "_left.png", "rb"),
-        mask=open(in_fn + "_left.png", "rb"),
+        image=open(path + "/" + in_fn + "_left.png", "rb"),
+        mask=open(path + "/" + in_fn + "_left.png", "rb"),
         prompt=text_prompt,
         n=1,
         size="512x512"
@@ -87,11 +93,11 @@ def generate_extended_image(in_fn, out_fn, text_prompt):
     #print(image_url)
     img = Image.open(BytesIO(requests.get(image_url).content))
     img.putalpha(255)
-    img.save(out_fn + "_left.png")
+    img.save(path + "/" + out_fn + "_left.png")
 
     edited_image = openai.Image.create_edit(
-        image=open(in_fn + "_right.png", "rb"),
-        mask=open(in_fn + "_right.png", "rb"),
+        image=open(path + "/" + in_fn + "_right.png", "rb"),
+        mask=open(path + "/" + in_fn + "_right.png", "rb"),
         prompt=text_prompt,
         n=1,
         size="512x512"
@@ -100,7 +106,7 @@ def generate_extended_image(in_fn, out_fn, text_prompt):
     #print(image_url)
     img = Image.open(BytesIO(requests.get(image_url).content))
     img.putalpha(255)
-    img.save(out_fn + "_right.png")
+    img.save(path + "/" + out_fn + "_right.png")
 
 def draw_gradient_alpha_rectangle(frame, BGR_Channel, rectangle_position, rotate):
     (xMin, yMin), (xMax, yMax) = rectangle_position
@@ -111,7 +117,7 @@ def draw_gradient_alpha_rectangle(frame, BGR_Channel, rectangle_position, rotate
     return frame
 
 def generate_image_from_prompt(text_prompt):
-    api_key = open('api_key.txt', 'r')
+    api_key = open(path + "/" + 'api_key.txt', 'r')
     openai.api_key =  api_key.readlines()[0].strip()
     img_name = "test_image"
     response = openai.Image.create(
@@ -120,24 +126,23 @@ def generate_image_from_prompt(text_prompt):
         size="512x512"
     )
     image_url = response['data'][0]['url']
-    print(image_url)
     img = Image.open(BytesIO(requests.get(image_url).content))
     img.putalpha(255)
-    img.save(img_name + '.png')
+    img.save(path + "/" + img_name + '.png')
 
     crop(img_name, img_name, math.ceil((target_width-target_height)/2) )
     extend(img_name, img_name, target_height)
     generate_extended_image(img_name, img_name, text_prompt)
     combine(img_name, f"{img_name}_combined")
     resize(f"{img_name}_combined", f"{img_name}_resized")
-    return cv2.imread(f"{img_name}_resized.png", cv2.IMREAD_ANYCOLOR)
+    return cv2.imread(f"{path}/{img_name}_resized.png", cv2.IMREAD_ANYCOLOR)
 
 def generate_text_prompt():
-    subjectprompts = open('subjectprompts.txt', 'r')
+    subjectprompts = open(path + "/" + 'subjectprompts.txt', 'r')
     subjects = subjectprompts.readlines()
     num_subjects = len(subjects)
 
-    artistprompts = open('artistprompts.txt', 'r')
+    artistprompts = open(path + "/" + 'artistprompts.txt', 'r')
     artists = artistprompts.readlines()
     num_artists = len(artists)
 
@@ -171,30 +176,52 @@ def format_text_on_image(text_prompt, image):
 
     return image
 
-def main():
+def show_blank_screen():
+    global kill_thread
+    img=cv2.imread(path + "/" + "blank_image.png", cv2.IMREAD_ANYCOLOR)
+    img = format_text_on_image("Painting Todays Artwork, Please Wait...", img)
+    while (kill_thread == False):
+        cv2.imshow("window", img)
+        cv2.waitKey(30)
+    #cv2.destroyAllWindows()
 
+def check_connection(host='http://google.com'):
+    try:
+        urllib.request.urlopen(host) #Python 3.x
+        return True
+    except:
+        return False
+
+def main():
+    global kill_thread
     parser = argparse.ArgumentParser(description='Run the digital picture frame', formatter_class=RawTextHelpFormatter)
     parser.add_argument('-i', '--interval', type=str, help='Interval that the photos should update at (in hours)', required=True)
     parser.add_argument('-c', '--use_cached', action='store_true', help='use a cached image instead of generating a new one')
     args = parser.parse_args()
+    cv2.namedWindow("window", cv2.WND_PROP_FULLSCREEN)
+    cv2.setWindowProperty("window",cv2.WND_PROP_FULLSCREEN,cv2.WINDOW_FULLSCREEN)
 
     while (True):
+        if (check_connection() == False):
+            subprocess.Popen(["python", "/home/pauladam316/digital_picture_frame/wifi_connection.py"])
+            sys.exit()
+        kill_thread = False
         text_prompt = generate_text_prompt()
 
+        thread = Thread(target = show_blank_screen)
+        thread.start()
+
         if args.use_cached:
-            img=cv2.imread("test_image_combined.png", cv2.IMREAD_ANYCOLOR)
+            img=cv2.imread(path + "/" + "test_image_resized.png", cv2.IMREAD_ANYCOLOR)
         else:
             img=generate_image_from_prompt(text_prompt)
 
         img = format_text_on_image(text_prompt, img)
         
-        cv2.namedWindow("window", cv2.WND_PROP_FULLSCREEN)
-        cv2.setWindowProperty("window",cv2.WND_PROP_FULLSCREEN,cv2.WINDOW_FULLSCREEN)
-
+        kill_thread = True
+        #print("true")
         cv2.imshow("window", img)
         cv2.waitKey(int(float(args.interval)*60*60*1000))
-        if keyboard.is_pressed("a"):
-            sys.exit() # to exit from all the processes
         
 if __name__ == "__main__":
     main()
