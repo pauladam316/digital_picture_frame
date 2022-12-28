@@ -146,7 +146,7 @@ class WifiConnection(QtWidgets.QMainWindow, wifi_ui.Ui_MainWindow):
             self.lb_conn_status.setText("Connection Failed")
         else:
             self.lb_conn_status.setText("Connection Succesful")
-            subprocess.Popen(["python", "/home/pauladam316/digital_picture_frame/main.py", "-i 0.16667"])
+            subprocess.Popen(["python", "/home/pauladam316/digital_picture_frame/main.py", "-i 24"])
             self.disable_keyboard()
             sys.exit()
 
@@ -157,7 +157,7 @@ def main():
     app = QApplication(sys.argv)
     form = WifiConnection()
     if (form.check_connection() == True):
-        subprocess.Popen(["python", "/home/pauladam316/digital_picture_frame/main.py", "-i 0.16667"])
+        subprocess.Popen(["python", "/home/pauladam316/digital_picture_frame/main.py", "-i 24"])
         form.disable_keyboard()
         sys.exit()
     else:
